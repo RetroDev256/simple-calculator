@@ -7,7 +7,7 @@ pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
     while (true) {
-        repl(stdin, stdout, alloc) catch |err| {
+        replOnce(stdin, stdout, alloc) catch |err| {
             const message = switch (err) {
                 error.Unexpected => "unexpected character in floating point number",
                 error.UnexpectedByte => "malformed input, not a valid math expression",
@@ -19,7 +19,7 @@ pub fn main() !void {
     }
 }
 
-fn repl(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
+fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
     try stdout.writeAll("Enter expression: ");
     const source = try input(alloc, stdin) orelse return null;
 
