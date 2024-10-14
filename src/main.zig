@@ -23,7 +23,14 @@ fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
     try stdout.writeAll("Enter expression: ");
     const source = try input(alloc, stdin) orelse return null;
 
-    // Read
+    // Program termination
+    if (std.StaticStringMap(void).initComptime(
+        .{ .{"quit"}, .{"exit"}, .{"q"}, .{"bye"} },
+    ).has(source)) {
+        return null;
+    }
+
+    // Read & Tokenize
     var toker: Tokenizer = .init(source);
     var token_list: std.ArrayListUnmanaged(Token) = .empty;
     defer token_list.deinit(alloc);
@@ -33,14 +40,21 @@ fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
         if (tok == .eof) break :read;
     }
 
-    // Eval
+    // Parse & Evaluate
     const tokens = try token_list.toOwnedSlice(alloc);
     defer alloc.free(tokens);
     var parser: Parser = .init(tokens);
     const result = try parser.parse();
 
     // Print
-    try stdout.print("> Result: {d}\n", .{result});
+    try stdout.writeAll("> Result: ");
+    if (result.im == 0) {
+        try stdout.print("{d}\n", .{result.re});
+    } else if (result.im < 0) {
+        try stdout.print("{d} - {d}i\n", .{ result.re, -result.im });
+    } else {
+        try stdout.print("{d} + {d}i\n", .{ result.re, result.im });
+    }
 }
 
 // helper function to get user input
@@ -57,28 +71,77 @@ fn input(alloc: Allocator, reader: anytype) !?[:0]const u8 {
     }
 }
 
-const Tag = enum {
-    eof,
-    l_paren,
-    r_paren,
-    add,
-    sub,
-    mul,
-    div,
-    exp,
-    number,
-};
+const Complex = std.math.complex.Complex(f64);
 
-const Token = union(Tag) {
-    eof,
-    l_paren,
-    r_paren,
-    add,
-    sub,
-    mul,
-    div,
-    exp,
-    number: []const u8,
+const Token = union(enum) {
+    // Special
+    eof, // \x00
+
+    // Grouping
+
+    // Level 0
+    add, // +
+    sub, // -
+
+    // Level 1
+    mul, // *
+    div, // /
+
+    // Level 2
+    pow, // ^
+
+    // Level 3
+    l_paren, // (
+    r_paren, // )
+    real, // real
+    imag, // imag
+    sqrt, // sqrt
+    log10, // log
+    loge, // ln
+    log2, // lb
+    exp, // exp
+    sin, // sin
+    cos, // cos
+    tan, // tan
+    abs, // abs
+    sinh, // sinh
+    cosh, // cosh
+    tanh, // tanh
+    asin, // asin
+    acos, // acos
+    atan, // atan
+    asinh, // asinh
+    acosh, // acosh
+    atanh, // atanh
+    ceil, // ceil
+    floor, // floor
+
+    // Level 4
+    previous, // .
+    number: Complex, // 12345
+
+    const constant_map = std.StaticStringMap(Complex).initComptime(.{
+        .{ "i", Complex.init(0, 1) },
+        .{ "e", Complex.init(std.math.e, 0) },
+        .{ "pi", Complex.init(std.math.pi, 0) },
+        .{ "phi", Complex.init(std.math.phi, 0) },
+        .{ "tau", Complex.init(std.math.tau, 0) },
+    });
+
+    const function_map = std.StaticStringMap(Token).initComptime(.{
+        .{ "re", .real },     .{ "im", .imag },
+        .{ "real", .real },   .{ "imag", .imag },
+        .{ "sqrt", .sqrt },   .{ "log", .log10 },
+        .{ "ln", .loge },     .{ "lb", .log2 },
+        .{ "exp", .exp },     .{ "abs", .abs },
+        .{ "sin", .sin },     .{ "cos", .cos },
+        .{ "tan", .tan },     .{ "sinh", .sinh },
+        .{ "cosh", .cosh },   .{ "tanh", .tanh },
+        .{ "asin", .asin },   .{ "acos", .acos },
+        .{ "atan", .atan },   .{ "asinh", .asinh },
+        .{ "acosh", .acosh }, .{ "atanh", .atanh },
+        .{ "ceil", .ceil },   .{ "floor", .floor },
+    });
 };
 
 const Tokenizer = struct {
@@ -105,19 +168,48 @@ const Tokenizer = struct {
                     '-' => .sub,
                     '*' => .mul,
                     '/' => .div,
-                    '^' => .exp,
+                    '^' => .pow,
                     else => unreachable,
                 };
             },
-            '0'...'9', '.' => {
+            '.' => {
+                switch (self.source[self.index + 1]) {
+                    '0'...'9' => continue :scan self.source[self.index],
+                    else => {
+                        self.index += 1;
+                        return .previous;
+                    },
+                }
+            },
+            '0'...'9' => {
                 const start = self.index;
                 while (true) {
                     self.index += 1;
                     switch (self.source[self.index]) {
                         '0'...'9', '.' => continue,
                         else => {
-                            const number = self.source[start..self.index];
-                            return .{ .number = number };
+                            const real_str = self.source[start..self.index];
+                            const real = try std.fmt.parseFloat(f64, real_str);
+                            return .{ .number = Complex.init(real, 0) };
+                        },
+                    }
+                }
+            },
+            'A'...'Z', 'a'...'z', '_' => {
+                const start = self.index;
+                while (true) {
+                    self.index += 1;
+                    switch (self.source[self.index]) {
+                        'A'...'Z', 'a'...'z', '_' => continue,
+                        else => {
+                            const identifier = self.source[start..self.index];
+                            if (Token.constant_map.get(identifier)) |constant| {
+                                return .{ .number = constant };
+                            } else if (Token.function_map.get(identifier)) |function| {
+                                return function;
+                            } else {
+                                return error.IdentifiersNotImplementedYet;
+                            }
                         },
                     }
                 }
@@ -136,90 +228,217 @@ const Parser = struct {
         return .{ .source = source, .index = 0 };
     }
 
-    const ParseError = std.fmt.ParseFloatError || error{UnexpectedToken};
+    const ParseError = error{UnexpectedToken};
 
     // evaluates an expression and returns the result
-    pub fn parse(self: *@This()) ParseError!f64 {
+    pub fn parse(self: *@This()) ParseError!Complex {
         const result = try self.expression();
         try self.consume(.eof);
         return result;
     }
 
     // <expression> ::= <term> (("+" | "-") <term>)*
-    fn expression(self: *@This()) ParseError!f64 {
-        var result: f64 = try self.term();
+    fn expression(self: *@This()) ParseError!Complex {
+        var result: Complex = try self.term();
         scan: switch (self.source[self.index]) {
             .add => {
-                try self.consume(.add);
-                result += try self.term();
+                self.index += 1;
+                result = result.add(try self.term());
                 continue :scan self.source[self.index];
             },
             .sub => {
-                try self.consume(.sub);
-                result -= try self.term();
+                self.index += 1;
+                result = result.sub(try self.term());
                 continue :scan self.source[self.index];
             },
             else => return result,
         }
     }
 
-    // <term> ::= <factor> (("*" | "/") <factor>)*
-    fn term(self: *@This()) ParseError!f64 {
-        var result: f64 = try self.factor();
+    // <term> ::= <factor> (("*" | "/") <factor>)* | <factor> <factor>
+    fn term(self: *@This()) ParseError!Complex {
+        var result: Complex = try self.factor();
         scan: switch (self.source[self.index]) {
             .mul => {
-                try self.consume(.mul);
-                result *= try self.factor();
+                self.index += 1;
+                result = result.mul(try self.factor());
                 continue :scan self.source[self.index];
             },
             .div => {
-                try self.consume(.div);
-                result /= try self.factor();
+                self.index += 1;
+                result = result.div(try self.factor());
                 continue :scan self.source[self.index];
             },
-            else => return result,
+            else => {
+                // implied multiplication
+                if (self.factor()) |other| {
+                    return result.mul(other);
+                } else |_| {
+                    return result;
+                }
+            },
         }
     }
 
-    // factor ::= negation ('^' factor)*
-    fn factor(self: *@This()) ParseError!f64 {
-        var result: f64 = try self.negation();
-        if (self.source[self.index] == .exp) {
-            try self.consume(.exp);
+    // <factor> ::= <negation> ('^' <factor>)*
+    fn factor(self: *@This()) ParseError!Complex {
+        var result: Complex = try self.negation();
+        if (self.source[self.index] == .pow) {
+            self.index += 1;
             const power = try self.factor();
-            result = std.math.pow(f64, result, power);
+            result = std.math.complex.pow(result, power);
         }
         return result;
     }
 
     // <negation> ::= "-" <base> | <base>
-    fn negation(self: *@This()) ParseError!f64 {
+    fn negation(self: *@This()) ParseError!Complex {
         if (self.source[self.index] == .sub) {
-            try self.consume(.sub);
-            return -try self.number();
+            self.index += 1;
+            return (try self.number()).neg();
         }
         return try self.number();
     }
 
-    // number ::= '(' expression ')' | <floating point number>
-    fn number(self: *@This()) ParseError!f64 {
+    // <number> ::= '(' <expression> ')' | <floating point number> | <function>
+    fn number(self: *@This()) ParseError!Complex {
         switch (self.source[self.index]) {
             .l_paren => {
-                try self.consume(.l_paren);
+                self.index += 1;
                 const result = try self.expression();
                 try self.consume(.r_paren);
                 return result;
             },
-            .number => |num_str| {
-                try self.consume(.number);
-                return try std.fmt.parseFloat(f64, num_str);
+            .number => |num| {
+                self.index += 1;
+                return num;
+            },
+            else => return try self.function(),
+        }
+    }
+
+    // <function> ::= <function type> <number>
+    fn function(self: *@This()) ParseError!Complex {
+        switch (self.source[self.index]) {
+            .real => {
+                self.index += 1;
+                const num = try self.number();
+                return Complex.init(num.re, 0);
+            },
+            .imag => {
+                self.index += 1;
+                const num = try self.number();
+                return Complex.init(num.im, 0);
+            },
+            .sqrt => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.sqrt(num);
+            },
+            .log10 => {
+                self.index += 1;
+                const num = try self.number();
+                const log10 = comptime std.math.complex.log(Complex.init(10, 0));
+                return std.math.complex.log(num).div(log10);
+            },
+            .loge => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.log(num);
+            },
+            .log2 => {
+                self.index += 1;
+                const num = try self.number();
+                const log2 = comptime std.math.complex.log(Complex.init(2, 0));
+                return std.math.complex.log(num).div(log2);
+            },
+            .exp => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.exp(num);
+            },
+            .abs => {
+                self.index += 1;
+                const num = try self.number();
+                const mag = std.math.complex.abs(num);
+                return Complex.init(mag, 0);
+            },
+            .sin => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.sin(num);
+            },
+            .cos => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.cos(num);
+            },
+            .tan => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.tan(num);
+            },
+            .sinh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.sinh(num);
+            },
+            .cosh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.cosh(num);
+            },
+            .tanh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.tanh(num);
+            },
+            .asin => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.asin(num);
+            },
+            .acos => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.acos(num);
+            },
+            .atan => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.atan(num);
+            },
+            .asinh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.asinh(num);
+            },
+            .acosh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.acosh(num);
+            },
+            .atanh => {
+                self.index += 1;
+                const num = try self.number();
+                return std.math.complex.atanh(num);
+            },
+            .ceil => {
+                self.index += 1;
+                const num = try self.number();
+                return Complex.init(@ceil(num.re), @ceil(num.im));
+            },
+            .floor => {
+                self.index += 1;
+                const num = try self.number();
+                return Complex.init(@floor(num.re), @floor(num.im));
             },
             else => return error.UnexpectedToken,
         }
     }
 
-    // asserts the matching token tag and advances to the next
-    fn consume(self: *@This(), tag: Tag) ParseError!void {
+    // checks that the matching token tag and advances to the next
+    fn consume(self: *@This(), tag: std.meta.Tag(Token)) ParseError!void {
         if (self.source[self.index] != tag) {
             return error.UnexpectedToken;
         }
