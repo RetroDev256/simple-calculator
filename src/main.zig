@@ -7,6 +7,7 @@ pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
     var state: State = .init;
+    defer state.deinit(alloc);
 
     while (true) {
         replOnce(stdin, stdout, alloc, &state) catch |err| {
@@ -34,6 +35,11 @@ const State = struct {
         .previous = .init(0, 0),
         .variables = .empty,
     };
+
+    pub fn deinit(self: *@This(), alloc: Allocator) void {
+        defer self.* = undefined;
+        self.variables.deinit(alloc);
+    }
 };
 
 fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator, state: *State) !?void {
