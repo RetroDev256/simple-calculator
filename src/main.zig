@@ -321,7 +321,7 @@ const Parser = struct {
         }
     }
 
-    // <term> ::= <factor> (("*" | "/") <factor>)* | <factor> <factor>
+    // <term> ::= <factor> (("*" | "/") <factor>)* | <factor> <term>
     fn term(self: *@This()) ParseError!Complex {
         var result: Complex = try self.factor();
         scan: switch (self.source[self.index]) {
@@ -337,7 +337,7 @@ const Parser = struct {
             },
             else => {
                 // implied multiplication
-                if (self.factor()) |other| {
+                if (self.term()) |other| {
                     return result.mul(other);
                 } else |_| {
                     return result;
