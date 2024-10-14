@@ -127,6 +127,7 @@ const Token = union(enum) {
     atanh, // atanh
     ceil, // ceil
     floor, // floor
+    gamma, // gamma
 
     // Level 4
     previous, // .
@@ -154,7 +155,7 @@ const Token = union(enum) {
         .{ "acos", .acos },      .{ "atan", .atan },
         .{ "asinh", .asinh },    .{ "acosh", .acosh },
         .{ "atanh", .atanh },    .{ "ceil", .ceil },
-        .{ "floor", .floor },
+        .{ "floor", .floor },    .{ "gamma", .gamma },
     });
 };
 
@@ -450,6 +451,18 @@ const Parser = struct {
             .floor => {
                 self.index += 1;
                 const num = try self.number();
+                return Complex.init(@floor(num.re), @floor(num.im));
+            },
+            .gamma => {
+                self.index += 1;
+                const num = try self.number();
+                const gamma_re = std.math.gamma(f64, num.re);
+                if (num.im == 0) {
+                    return Complex.init(gamma_re, 0);
+                } else {
+                    const gamma_im = std.math.gamma(f64, num.im);
+                    return Complex.init(gamma_re, gamma_im);
+                }
                 return Complex.init(@floor(num.re), @floor(num.im));
             },
             else => return error.UnexpectedToken,
