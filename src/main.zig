@@ -14,6 +14,9 @@ pub fn main() !void {
                 error.Unexpected => "unexpected character in floating point number",
                 error.UnexpectedByte => "malformed input, not a valid math expression",
                 error.UnexpectedToken => "malformed mathematical expression",
+                error.VariableNotDefined => "invalid variable, constant, or function name",
+                error.VariableShadowsConstant => "variable name shadows mathematical constant",
+                error.VariableShadowsFunction => "variable name shadows mathematical function",
                 else => return err,
             };
             try stdout.print("Error: {s}\n", .{message});
@@ -25,12 +28,16 @@ const Complex = std.math.complex.Complex(f64);
 
 const State = struct {
     previous: Complex,
+    variables: std.StringHashMapUnmanaged(Complex),
 
-    pub const init: @This() = .{ .previous = .init(0, 0) };
+    pub const init: @This() = .{
+        .previous = .init(0, 0),
+        .variables = .empty,
+    };
 };
 
 fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator, state: *State) !?void {
-    try stdout.writeAll("Enter expression: ");
+    try stdout.writeAll("Expr: ");
     const source = try input(alloc, stdin) orelse return null;
 
     // Program termination
@@ -53,20 +60,19 @@ fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator, state: *State) !?
     // Parse & Evaluate
     const tokens = try token_list.toOwnedSlice(alloc);
     defer alloc.free(tokens);
-    var parser: Parser = .init(tokens, state);
-    const result = try parser.parse();
-
-    // Update the state
-    state.previous = result;
-
-    // Print
-    try stdout.writeAll("> Result: ");
-    if (result.im == 0) {
-        try stdout.print("{d}\n", .{result.re});
-    } else if (result.im < 0) {
-        try stdout.print("{d} - {d}i\n", .{ result.re, -result.im });
-    } else {
-        try stdout.print("{d} + {d}i\n", .{ result.re, result.im });
+    var parser: Parser = .init(tokens, state, alloc);
+    if (try parser.parse()) |result| {
+        // Update the state
+        state.previous = result;
+        // Print the evaluation
+        try stdout.writeAll("=> ");
+        if (result.im == 0) {
+            try stdout.print("{d}\n", .{result.re});
+        } else if (result.im < 0) {
+            try stdout.print("{d} - {d}i\n", .{ result.re, -result.im });
+        } else {
+            try stdout.print("{d} + {d}i\n", .{ result.re, result.im });
+        }
     }
 }
 
@@ -87,8 +93,7 @@ fn input(alloc: Allocator, reader: anytype) !?[:0]const u8 {
 const Token = union(enum) {
     // Special
     eof, // \x00
-
-    // Grouping
+    equal, // =
 
     // Level 0
     add, // +
@@ -132,6 +137,7 @@ const Token = union(enum) {
     // Level 4
     previous, // .
     number: Complex, // 12345
+    variable: []const u8, // dead_beef
 
     const constant_map = std.StaticStringMap(Complex).initComptime(.{
         .{ "i", Complex.init(0, 1) },
@@ -199,7 +205,7 @@ const Tokenizer = struct {
                             } else {
                                 const real_str = self.source[start..self.index];
                                 const real = try std.fmt.parseFloat(f64, real_str);
-                                return .{ .number = Complex.init(real, 0) };
+                                return .{ .number = .init(real, 0) };
                             }
                         },
                     }
@@ -218,11 +224,15 @@ const Tokenizer = struct {
                             } else if (Token.function_map.get(identifier)) |function| {
                                 return function;
                             } else {
-                                return error.IdentifiersNotImplementedYet;
+                                return .{ .variable = identifier };
                             }
                         },
                     }
                 }
+            },
+            '=' => {
+                self.index += 1;
+                return .equal;
             },
             else => return error.UnexpectedByte,
         }
@@ -234,18 +244,49 @@ const Parser = struct {
     source: []const Token,
     index: usize,
     state: *State,
+    allocator: Allocator,
 
-    pub fn init(source: []const Token, state: *State) @This() {
-        return .{ .source = source, .index = 0, .state = state };
+    pub fn init(source: []const Token, state: *State, allocator: Allocator) @This() {
+        return .{
+            .source = source,
+            .index = 0,
+            .state = state,
+            .allocator = allocator,
+        };
     }
 
-    const ParseError = error{UnexpectedToken};
+    const ParseError = error{
+        UnexpectedToken,
+        VariableNotDefined,
+        VariableShadowsConstant,
+        VariableShadowsFunction,
+    } || Allocator.Error;
 
     // evaluates an expression and returns the result
-    pub fn parse(self: *@This()) ParseError!Complex {
-        const result = try self.expression();
+    pub fn parse(self: *@This()) ParseError!?Complex {
+        const result = try self.root();
         try self.consume(.eof);
         return result;
+    }
+
+    // <root> ::= <variable> <equal> <expression> | <expression>
+    fn root(self: *@This()) ParseError!?Complex {
+        if (self.source[self.index] == .variable) {
+            if (self.source[self.index + 1] == .equal) {
+                const name = self.source[self.index].variable;
+                if (Token.constant_map.has(name)) {
+                    return error.VariableShadowsConstant;
+                } else if (Token.function_map.has(name)) {
+                    return error.VariableShadowsFunction;
+                } else {
+                    self.index += 2;
+                    const value = try self.expression();
+                    try self.state.variables.put(self.allocator, name, value);
+                    return null;
+                }
+            }
+        }
+        return try self.expression();
     }
 
     // <expression> ::= <term> (("+" | "-") <term>)*
@@ -328,6 +369,14 @@ const Parser = struct {
                 self.index += 1;
                 return self.state.previous;
             },
+            .variable => |name| {
+                self.index += 1;
+                if (self.state.variables.get(name)) |value| {
+                    return value;
+                } else {
+                    return error.VariableNotDefined;
+                }
+            },
             else => return try self.function(),
         }
     }
@@ -343,12 +392,12 @@ const Parser = struct {
             .real => {
                 self.index += 1;
                 const num = try self.number();
-                return Complex.init(num.re, 0);
+                return .init(num.re, 0);
             },
             .imag => {
                 self.index += 1;
                 const num = try self.number();
-                return Complex.init(num.im, 0);
+                return .init(num.im, 0);
             },
             .sqrt => {
                 self.index += 1;
@@ -358,7 +407,7 @@ const Parser = struct {
             .log10 => {
                 self.index += 1;
                 const num = try self.number();
-                const log10 = comptime std.math.complex.log(Complex.init(10, 0));
+                const log10 = std.math.complex.log(Complex.init(10, 0));
                 return std.math.complex.log(num).div(log10);
             },
             .loge => {
@@ -369,7 +418,7 @@ const Parser = struct {
             .log2 => {
                 self.index += 1;
                 const num = try self.number();
-                const log2 = comptime std.math.complex.log(Complex.init(2, 0));
+                const log2 = std.math.complex.log(Complex.init(2, 0));
                 return std.math.complex.log(num).div(log2);
             },
             .exp => {
@@ -381,7 +430,7 @@ const Parser = struct {
                 self.index += 1;
                 const num = try self.number();
                 const mag = std.math.complex.abs(num);
-                return Complex.init(mag, 0);
+                return .init(mag, 0);
             },
             .sin => {
                 self.index += 1;
@@ -446,24 +495,23 @@ const Parser = struct {
             .ceil => {
                 self.index += 1;
                 const num = try self.number();
-                return Complex.init(@ceil(num.re), @ceil(num.im));
+                return .init(@ceil(num.re), @ceil(num.im));
             },
             .floor => {
                 self.index += 1;
                 const num = try self.number();
-                return Complex.init(@floor(num.re), @floor(num.im));
+                return .init(@floor(num.re), @floor(num.im));
             },
             .gamma => {
                 self.index += 1;
                 const num = try self.number();
                 const gamma_re = std.math.gamma(f64, num.re);
                 if (num.im == 0) {
-                    return Complex.init(gamma_re, 0);
+                    return .init(gamma_re, 0);
                 } else {
                     const gamma_im = std.math.gamma(f64, num.im);
-                    return Complex.init(gamma_re, gamma_im);
+                    return .init(gamma_re, gamma_im);
                 }
-                return Complex.init(@floor(num.re), @floor(num.im));
             },
             else => return error.UnexpectedToken,
         }
