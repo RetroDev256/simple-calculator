@@ -115,7 +115,7 @@ const Token = union(enum) {
     sin, // sin
     cos, // cos
     tan, // tan
-    abs, // abs
+    abs, // abs / mag
     sinh, // sinh
     cosh, // cosh
     tanh, // tanh
@@ -146,14 +146,15 @@ const Token = union(enum) {
         .{ "real", .real },      .{ "imag", .imag },
         .{ "sqrt", .sqrt },      .{ "log", .log10 },
         .{ "ln", .loge },        .{ "lb", .log2 },
-        .{ "exp", .exp },        .{ "abs", .abs },
-        .{ "sin", .sin },        .{ "cos", .cos },
-        .{ "tan", .tan },        .{ "sinh", .sinh },
-        .{ "cosh", .cosh },      .{ "tanh", .tanh },
-        .{ "asin", .asin },      .{ "acos", .acos },
-        .{ "atan", .atan },      .{ "asinh", .asinh },
-        .{ "acosh", .acosh },    .{ "atanh", .atanh },
-        .{ "ceil", .ceil },      .{ "floor", .floor },
+        .{ "exp", .exp },        .{ "mag", .abs },
+        .{ "abs", .abs },        .{ "sin", .sin },
+        .{ "cos", .cos },        .{ "tan", .tan },
+        .{ "sinh", .sinh },      .{ "cosh", .cosh },
+        .{ "tanh", .tanh },      .{ "asin", .asin },
+        .{ "acos", .acos },      .{ "atan", .atan },
+        .{ "asinh", .asinh },    .{ "acosh", .acosh },
+        .{ "atanh", .atanh },    .{ "ceil", .ceil },
+        .{ "floor", .floor },
     });
 };
 
@@ -333,6 +334,11 @@ const Parser = struct {
     // <function> ::= <function type> <number>
     fn function(self: *@This()) ParseError!Complex {
         switch (self.source[self.index]) {
+            .conjugate => {
+                self.index += 1;
+                const num = try self.number();
+                return num.conjugate();
+            },
             .real => {
                 self.index += 1;
                 const num = try self.number();
