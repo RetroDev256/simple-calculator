@@ -6,8 +6,10 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const alloc = std.heap.page_allocator;
 
+    var state: State = .init;
+
     while (true) {
-        replOnce(stdin, stdout, alloc) catch |err| {
+        replOnce(stdin, stdout, alloc, &state) catch |err| {
             const message = switch (err) {
                 error.Unexpected => "unexpected character in floating point number",
                 error.UnexpectedByte => "malformed input, not a valid math expression",
@@ -19,7 +21,15 @@ pub fn main() !void {
     }
 }
 
-fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
+const Complex = std.math.complex.Complex(f64);
+
+const State = struct {
+    previous: Complex,
+
+    pub const init: @This() = .{ .previous = .init(0, 0) };
+};
+
+fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator, state: *State) !?void {
     try stdout.writeAll("Enter expression: ");
     const source = try input(alloc, stdin) orelse return null;
 
@@ -43,8 +53,11 @@ fn replOnce(stdin: anytype, stdout: anytype, alloc: Allocator) !?void {
     // Parse & Evaluate
     const tokens = try token_list.toOwnedSlice(alloc);
     defer alloc.free(tokens);
-    var parser: Parser = .init(tokens);
+    var parser: Parser = .init(tokens, state);
     const result = try parser.parse();
+
+    // Update the state
+    state.previous = result;
 
     // Print
     try stdout.writeAll("> Result: ");
@@ -71,8 +84,6 @@ fn input(alloc: Allocator, reader: anytype) !?[:0]const u8 {
     }
 }
 
-const Complex = std.math.complex.Complex(f64);
-
 const Token = union(enum) {
     // Special
     eof, // \x00
@@ -93,8 +104,9 @@ const Token = union(enum) {
     // Level 3
     l_paren, // (
     r_paren, // )
-    real, // real
-    imag, // imag
+    conjugate, // conj / conjugate
+    real, // re / real
+    imag, // im / imag
     sqrt, // sqrt
     log10, // log
     loge, // ln
@@ -129,18 +141,19 @@ const Token = union(enum) {
     });
 
     const function_map = std.StaticStringMap(Token).initComptime(.{
-        .{ "re", .real },     .{ "im", .imag },
-        .{ "real", .real },   .{ "imag", .imag },
-        .{ "sqrt", .sqrt },   .{ "log", .log10 },
-        .{ "ln", .loge },     .{ "lb", .log2 },
-        .{ "exp", .exp },     .{ "abs", .abs },
-        .{ "sin", .sin },     .{ "cos", .cos },
-        .{ "tan", .tan },     .{ "sinh", .sinh },
-        .{ "cosh", .cosh },   .{ "tanh", .tanh },
-        .{ "asin", .asin },   .{ "acos", .acos },
-        .{ "atan", .atan },   .{ "asinh", .asinh },
-        .{ "acosh", .acosh }, .{ "atanh", .atanh },
-        .{ "ceil", .ceil },   .{ "floor", .floor },
+        .{ "conj", .conjugate }, .{ "conjugate", .conjugate },
+        .{ "re", .real },        .{ "im", .imag },
+        .{ "real", .real },      .{ "imag", .imag },
+        .{ "sqrt", .sqrt },      .{ "log", .log10 },
+        .{ "ln", .loge },        .{ "lb", .log2 },
+        .{ "exp", .exp },        .{ "abs", .abs },
+        .{ "sin", .sin },        .{ "cos", .cos },
+        .{ "tan", .tan },        .{ "sinh", .sinh },
+        .{ "cosh", .cosh },      .{ "tanh", .tanh },
+        .{ "asin", .asin },      .{ "acos", .acos },
+        .{ "atan", .atan },      .{ "asinh", .asinh },
+        .{ "acosh", .acosh },    .{ "atanh", .atanh },
+        .{ "ceil", .ceil },      .{ "floor", .floor },
     });
 };
 
@@ -172,25 +185,20 @@ const Tokenizer = struct {
                     else => unreachable,
                 };
             },
-            '.' => {
-                switch (self.source[self.index + 1]) {
-                    '0'...'9' => continue :scan self.source[self.index],
-                    else => {
-                        self.index += 1;
-                        return .previous;
-                    },
-                }
-            },
-            '0'...'9' => {
+            '0'...'9', '.' => {
                 const start = self.index;
                 while (true) {
                     self.index += 1;
                     switch (self.source[self.index]) {
                         '0'...'9', '.' => continue,
                         else => {
-                            const real_str = self.source[start..self.index];
-                            const real = try std.fmt.parseFloat(f64, real_str);
-                            return .{ .number = Complex.init(real, 0) };
+                            if (self.source[start] == '.' and self.index == start + 1) {
+                                return .previous;
+                            } else {
+                                const real_str = self.source[start..self.index];
+                                const real = try std.fmt.parseFloat(f64, real_str);
+                                return .{ .number = Complex.init(real, 0) };
+                            }
                         },
                     }
                 }
@@ -222,10 +230,11 @@ const Tokenizer = struct {
 const Parser = struct {
     // delimited by .eof
     source: []const Token,
-    index: usize = 0,
+    index: usize,
+    state: *State,
 
-    pub fn init(source: []const Token) @This() {
-        return .{ .source = source, .index = 0 };
+    pub fn init(source: []const Token, state: *State) @This() {
+        return .{ .source = source, .index = 0, .state = state };
     }
 
     const ParseError = error{UnexpectedToken};
@@ -312,6 +321,10 @@ const Parser = struct {
             .number => |num| {
                 self.index += 1;
                 return num;
+            },
+            .previous => {
+                self.index += 1;
+                return self.state.previous;
             },
             else => return try self.function(),
         }
