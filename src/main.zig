@@ -148,20 +148,34 @@ const Token = union(enum) {
     });
 
     const function_map = std.StaticStringMap(Token).initComptime(.{
-        .{ "conj", .conjugate }, .{ "conjugate", .conjugate },
-        .{ "re", .real },        .{ "im", .imag },
-        .{ "real", .real },      .{ "imag", .imag },
-        .{ "sqrt", .sqrt },      .{ "log", .log10 },
-        .{ "ln", .loge },        .{ "lb", .log2 },
-        .{ "exp", .exp },        .{ "mag", .abs },
-        .{ "abs", .abs },        .{ "sin", .sin },
-        .{ "cos", .cos },        .{ "tan", .tan },
-        .{ "sinh", .sinh },      .{ "cosh", .cosh },
-        .{ "tanh", .tanh },      .{ "asin", .asin },
-        .{ "acos", .acos },      .{ "atan", .atan },
-        .{ "asinh", .asinh },    .{ "acosh", .acosh },
-        .{ "atanh", .atanh },    .{ "ceil", .ceil },
-        .{ "floor", .floor },    .{ "gamma", .gamma },
+        .{ "conj", .conjugate },
+        .{ "conjugate", .conjugate },
+        .{ "re", .real },
+        .{ "im", .imag },
+        .{ "real", .real },
+        .{ "imag", .imag },
+        .{ "sqrt", .sqrt },
+        .{ "log", .log10 },
+        .{ "ln", .loge },
+        .{ "lb", .log2 },
+        .{ "exp", .exp },
+        .{ "mag", .abs },
+        .{ "abs", .abs },
+        .{ "sin", .sin },
+        .{ "cos", .cos },
+        .{ "tan", .tan },
+        .{ "sinh", .sinh },
+        .{ "cosh", .cosh },
+        .{ "tanh", .tanh },
+        .{ "asin", .asin },
+        .{ "acos", .acos },
+        .{ "atan", .atan },
+        .{ "asinh", .asinh },
+        .{ "acosh", .acosh },
+        .{ "atanh", .atanh },
+        .{ "ceil", .ceil },
+        .{ "floor", .floor },
+        .{ "gamma", .gamma },
     });
 };
 
@@ -383,135 +397,70 @@ const Parser = struct {
 
     // <function> ::= <function type> <number>
     fn function(self: *@This()) ParseError!Complex {
-        switch (self.source[self.index]) {
-            .conjugate => {
+        const complex = std.math.complex;
+        const log10 = complex.log(Complex.init(10, 0));
+        const log2 = complex.log(Complex.init(2, 0));
+        const token = self.source[self.index];
+        switch (token) {
+            .conjugate,
+            .real,
+            .imag,
+            .sqrt,
+            .log10,
+            .loge,
+            .log2,
+            .exp,
+            .abs,
+            .sin,
+            .cos,
+            .tan,
+            .sinh,
+            .cosh,
+            .tanh,
+            .asin,
+            .acos,
+            .atan,
+            .asinh,
+            .acosh,
+            .atanh,
+            .ceil,
+            .floor,
+            .gamma,
+            => {
                 self.index += 1;
                 const num = try self.number();
-                return num.conjugate();
-            },
-            .real => {
-                self.index += 1;
-                const num = try self.number();
-                return .init(num.re, 0);
-            },
-            .imag => {
-                self.index += 1;
-                const num = try self.number();
-                return .init(num.im, 0);
-            },
-            .sqrt => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.sqrt(num);
-            },
-            .log10 => {
-                self.index += 1;
-                const num = try self.number();
-                const log10 = std.math.complex.log(Complex.init(10, 0));
-                return std.math.complex.log(num).div(log10);
-            },
-            .loge => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.log(num);
-            },
-            .log2 => {
-                self.index += 1;
-                const num = try self.number();
-                const log2 = std.math.complex.log(Complex.init(2, 0));
-                return std.math.complex.log(num).div(log2);
-            },
-            .exp => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.exp(num);
-            },
-            .abs => {
-                self.index += 1;
-                const num = try self.number();
-                const mag = std.math.complex.abs(num);
-                return .init(mag, 0);
-            },
-            .sin => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.sin(num);
-            },
-            .cos => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.cos(num);
-            },
-            .tan => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.tan(num);
-            },
-            .sinh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.sinh(num);
-            },
-            .cosh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.cosh(num);
-            },
-            .tanh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.tanh(num);
-            },
-            .asin => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.asin(num);
-            },
-            .acos => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.acos(num);
-            },
-            .atan => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.atan(num);
-            },
-            .asinh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.asinh(num);
-            },
-            .acosh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.acosh(num);
-            },
-            .atanh => {
-                self.index += 1;
-                const num = try self.number();
-                return std.math.complex.atanh(num);
-            },
-            .ceil => {
-                self.index += 1;
-                const num = try self.number();
-                return .init(@ceil(num.re), @ceil(num.im));
-            },
-            .floor => {
-                self.index += 1;
-                const num = try self.number();
-                return .init(@floor(num.re), @floor(num.im));
-            },
-            .gamma => {
-                self.index += 1;
-                const num = try self.number();
-                const gamma_re = std.math.gamma(f64, num.re);
-                if (num.im == 0) {
-                    return .init(gamma_re, 0);
-                } else {
-                    const gamma_im = std.math.gamma(f64, num.im);
-                    return .init(gamma_re, gamma_im);
-                }
+                return switch (token) {
+                    .conjugate => num.conjugate(),
+                    .real => .init(num.re, 0),
+                    .imag => .init(num.im, 0),
+                    .sqrt => complex.sqrt(num),
+                    .log10 => complex.log(num).div(log10),
+                    .loge => complex.log(num),
+                    .log2 => complex.log(num).div(log2),
+                    .exp => complex.exp(num),
+                    .abs => .init(complex.abs(num), 0),
+                    .sin => complex.sin(num),
+                    .cos => complex.cos(num),
+                    .tan => complex.tan(num),
+                    .sinh => complex.sinh(num),
+                    .cosh => complex.cosh(num),
+                    .tanh => complex.tanh(num),
+                    .asin => complex.asin(num),
+                    .acos => complex.acos(num),
+                    .atan => complex.atan(num),
+                    .asinh => complex.asinh(num),
+                    .acosh => complex.acosh(num),
+                    .atanh => complex.atanh(num),
+                    .ceil => .init(@ceil(num.re), @ceil(num.im)),
+                    .floor => .init(@floor(num.re), @floor(num.im)),
+                    .gamma => blk: {
+                        const gamma_re = std.math.gamma(f64, num.re);
+                        const gamma_im = std.math.gamma(f64, num.im);
+                        const actual_im = if (num.im == 0) 0 else gamma_im;
+                        break :blk .init(gamma_re, actual_im);
+                    },
+                    else => unreachable,
+                };
             },
             else => return error.UnexpectedToken,
         }
